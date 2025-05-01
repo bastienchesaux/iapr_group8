@@ -3,39 +3,69 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
 import skimage as sk
+import cv2
 
-image_path = '../data/dataset_project_iapr2025/train/L1000756.JPG'
+def median_bin_rgb(image, block_size=(2, 2)):
+    channels = []
+    for i in range(3):  # R, G, B
+        channel = sk.measure.block_reduce(image[:, :, i], block_size=block_size, func=np.median)
+        channels.append(channel)
+    return np.stack(channels, axis=-1).astype(np.uint8)
+
+image_path = '../data/dataset_project_iapr2025/train/L1000993.JPG'
+
+
 
 img = np.array(Image.open(image_path))
 
-use_hsv = False
+binned = median_bin_rgb(img, block_size=(10, 10))
+binned = sk.filters.gaussian(binned, sigma=.4, channel_axis=2, preserve_range=True).astype(np.uint8)
+
+
+use_hsv = True
 revert = [False, False, False]
 
 if use_hsv:
-    hsv = sk.color.rgb2hsv(img)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
 
 mean = np.mean(img, axis=(0, 1))
-low_thresh = 0.7*mean
-high_thresh = 1.3*mean
+low_thresh = [0, 0, 0]
+high_thresh = [255, 255, 255]
 
 fig, ax = plt.subplots()
 plt.subplots_adjust(bottom=0.4)
 
 def threshold(img):
     mask = np.zeros_like(img, dtype=bool)
-    if not revert[0]:
-        mask = (img[..., 0] > low_thresh[0]) & (img[..., 0] < high_thresh[0])
-    else:
-        mask = (img[..., 0] < low_thresh[0]) | (img[..., 0] > high_thresh[0])
+    if not use_hsv:
+        if not revert[0]:
+            mask = (img[..., 0] > low_thresh[0]) & (img[..., 0] < high_thresh[0])
+        else:
+            mask = (img[..., 0] < low_thresh[0]) | (img[..., 0] > high_thresh[0])
 
-    if not revert[1]:
-        mask &= (img[..., 1] > low_thresh[1]) & (img[..., 1] < high_thresh[1])
+        if not revert[1]:
+            mask &= (img[..., 1] > low_thresh[1]) & (img[..., 1] < high_thresh[1])
+        else:
+            mask &= (img[..., 1] < low_thresh[1]) | (img[..., 1] > high_thresh[1])
+        if not revert[2]:
+            mask &= (img[..., 2] > low_thresh[2]) & (img[..., 2] < high_thresh[2])
+        else:
+            mask &= (img[..., 2] < low_thresh[2]) | (img[..., 2] > high_thresh[2])
     else:
-        mask &= (img[..., 1] < low_thresh[1]) | (img[..., 1] > high_thresh[1])
-    if not revert[2]:
-        mask &= (img[..., 2] > low_thresh[2]) & (img[..., 2] < high_thresh[2])
-    else:
-        mask &= (img[..., 2] < low_thresh[2]) | (img[..., 2] > high_thresh[2])
+        if not revert[0]:
+            mask = (hsv[..., 0] > low_thresh[0]) & (hsv[..., 0] < high_thresh[0])
+        else:
+            mask = (hsv[..., 0] < low_thresh[0]) | (hsv[..., 0] > high_thresh[0])
+
+        if not revert[1]:
+            mask &= (hsv[..., 1] > low_thresh[1]) & (hsv[..., 1] < high_thresh[1])
+        else:
+            mask &= (hsv[..., 1] < low_thresh[1]) | (hsv[..., 1] > high_thresh[1])
+        if not revert[2]:
+            mask &= (hsv[..., 2] > low_thresh[2]) & (hsv[..., 2] < high_thresh[2])
+        else:
+            mask &= (hsv[..., 2] < low_thresh[2]) | (hsv[..., 2] > high_thresh[2])
 
     overlay = np.zeros((img.shape[0], img.shape[1], 4), dtype=np.uint8)
     overlay[mask] = [0, 0, 255, 200]  # Red color for the overlay
