@@ -21,17 +21,17 @@ def hsv_spx_feat(hsv_img, spx, agg_func=np.median):
     v = np.zeros(np.max(spx)+1)
     for i in range(np.max(spx)+1):
         mask = spx == i
-        h[i] = agg_func(hsv_img[mask,0])
-        s[i] = agg_func(hsv_img[mask,1])
-        v[i] = agg_func(hsv_img[mask, 2])
+        h[i] = agg_func(hsv_img[mask,0])/180
+        s[i] = agg_func(hsv_img[mask,1])/255
+        v[i] = agg_func(hsv_img[mask, 2])/255
 
-    hx = np.cos(h/255*2*np.pi)
-    hy = np.sin(h/255*2*np.pi)
+    hx = np.cos(h*2*np.pi)
+    hy = np.sin(h*2*np.pi)
 
-    feat = np.array([hx, hy, s, v])
+    feat = np.array([h, s, v])
     X = sklearn.preprocessing.StandardScaler().fit_transform(feat.T)
 
-    return X
+    return feat.T
 
 def rgb_spx_feat(rgb_img, spx, agg_func=np.median):
     for i in range(np.max(spx)+1):
@@ -45,7 +45,7 @@ def rgb_spx_feat(rgb_img, spx, agg_func=np.median):
 
     return X
 
-def gmm_on_spx_fit(c_range, X):
+def gmm_on_spx_fit(c_range, X, plot=False):
     best_bic = np.inf
     best_gmm = None
     best_n_components = 0
@@ -60,6 +60,12 @@ def gmm_on_spx_fit(c_range, X):
             best_bic = bic
             best_gmm = gmm
             best_n_components = c
+    if plot:
+        plt.figure(figsize=(10, 5))
+        plt.plot(c_range, bics, marker='o')
+        plt.title('BIC vs Number of Components')
+        plt.tight_layout()
+        plt.show()  
 
     return best_gmm
 
@@ -67,3 +73,4 @@ def gmm_on_spx_predict(gmm, X, spx):
     labels = gmm.predict(X.reshape((-1, X.shape[2])))
     labels = labels.reshape((spx.shape[0], spx.shape[1]))
     return labels
+
