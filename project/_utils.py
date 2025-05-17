@@ -29,8 +29,6 @@ def hsv_spx_feat(hsv_img, spx, agg_func=np.median):
     hx = np.cos(h*2*np.pi)
     hy = np.sin(h*2*np.pi)
 
-
-
     feat = np.array([hx, hy, s, v])
     return feat.T
 
@@ -75,8 +73,6 @@ def gmm_on_spx_predict(gmm, X, spx):
     labels = labels.reshape((spx.shape[0], spx.shape[1]))
     return labels
 
-
-
 def kl_divergence_gaussians(mu0, cov0, mu1, cov1):
     k = len(mu0)
     cov1_inv = np.linalg.inv(cov1)
@@ -93,7 +89,6 @@ def symmetric_kl(mu0, cov0, mu1, cov1):
         kl_divergence_gaussians(mu1, cov1, mu0, cov0)
     )
 
-
 def merge_labels(labels, target, merge_ratio):
     merged = labels.copy()
 
@@ -108,6 +103,7 @@ def merge_labels(labels, target, merge_ratio):
             merged[labels==other] = target
     
     return merged
+
 def rgb_to_hsv(rgb_img):
     bgr_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
     hsv_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
