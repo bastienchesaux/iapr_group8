@@ -1,5 +1,6 @@
 import skimage as skim
 import sklearn 
+import scipy
 import cv2
 import numpy as np
 import scipy.ndimage as ndi
@@ -9,6 +10,8 @@ from PIL import Image
 from tqdm import tqdm
 import napari
 from typing import Callable
+
+from skimage.measure import regionprops
 
 def median_bin_rgb(image, block_size=(2, 2)):
     channels = []
@@ -105,3 +108,113 @@ def merge_labels(labels, target, merge_ratio):
             merged[labels==other] = target
     
     return merged
+def rgb_to_hsv(rgb_img):
+    bgr_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
+    hsv_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
+    return hsv_img
+
+def mean_from_mask(img, mask):
+    mean = np.mean(img[mask])
+    return mean
+
+def offset_range(img, mean, offset):
+    img_range = ((img < mean + offset) & (img > mean - offset))
+    return img_range
+
+def region_growing(rgb_img, hsv_img, mask):
+    mask = skim.morphology.binary_closing(mask, skim.morphology.disk(5))
+    mask = skim.morphology.remove_small_holes(mask, area_threshold=200)
+    mask = skim.morphology.remove_small_objects(mask, min_size=50)
+    mask = mask.astype(np.uint8)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    rg_mask = np.zeros_like(mask)
+    rg_mask = rg_mask.astype(bool)
+
+    for contour in contours:
+
+        small_mask = np.zeros_like(mask)
+
+        cv2.drawContours(small_mask, [contour], -1, 255, thickness=cv2.FILLED)
+
+        small_mask = small_mask.astype(bool)
+
+        mean_red = mean_from_mask(rgb_img[:,:,0], small_mask)
+        mean_green = mean_from_mask(rgb_img[:,:,1], small_mask)
+        mean_blue = mean_from_mask(rgb_img[:,:,2], small_mask)
+
+        mean_hue = mean_from_mask(hsv_img[:,:,0], small_mask)
+        mean_sat = mean_from_mask(hsv_img[:,:,1], small_mask)
+        mean_val = mean_from_mask(hsv_img[:,:,2], small_mask)
+
+        offset_hue = 54
+        offset_sat = 40
+        offset_val = 40
+
+        rgb_offset = 30
+        offset_red = rgb_offset
+        offset_green = rgb_offset
+        offset_blue = rgb_offset
+        
+        labelled = (offset_range(hsv_img[:,:,0], mean_hue, offset_hue) & offset_range(hsv_img[:,:,1], mean_sat, offset_sat) & offset_range(hsv_img[:,:,2], mean_val, offset_val) &
+                    offset_range(rgb_img[:,:,0], mean_red, offset_red) & offset_range(rgb_img[:,:,1], mean_green, offset_green) & offset_range(rgb_img[:,:,2], mean_blue, offset_blue))
+
+        small_mask = skim.morphology.binary_erosion(small_mask, skim.morphology.disk(5))
+
+        n_iterations = 10
+        
+        for i in range(n_iterations):         
+            small_mask |= (skim.morphology.binary_dilation(small_mask, skim.morphology.disk(3)) & labelled)     
+
+        rg_mask |= (small_mask == 1)
+
+    rg_mask = skim.morphology.binary_closing(rg_mask, skim.morphology.disk(5))
+    rg_mask = skim.morphology.remove_small_holes(rg_mask, area_threshold=1000)
+    rg_mask = skim.morphology.remove_small_objects(rg_mask, min_size=50)
+    return rg_mask
+
+def watershed(mask):
+    distance = scipy.ndimage.distance_transform_edt(mask)
+    coordinates = skim.feature.peak_local_max(distance, labels=mask, footprint=skim.morphology.disk(20))
+
+    local_maxi = np.zeros_like(distance, dtype=bool)
+    local_maxi[tuple(coordinates.T)] = True
+
+    markers = scipy.ndimage.label(local_maxi)[0]
+
+    labels = skim.segmentation.watershed(-distance, markers, mask=mask)
+    return labels
+
+def features_objects(contours, binned, processed):
+    # initialize lists to store images of each object
+    # and features
+    count_pixel = []
+    diff_object = []
+
+    f_peri = []
+    f_area = []
+    f_comp = []
+    f_rect = []
+
+    i = 0
+    for contour in contours:
+        count_pixel.append(0)
+        masque = np.zeros_like(processed)
+        cv2.drawContours(masque, [contour], -1, 255, thickness= cv2.FILLED)
+        chocolate = np.zeros_like(binned)
+        N, M, _ = binned.shape
+        for x in range(N):
+            for y in range(M):
+                if masque[x, y] != 0:
+                    chocolate[x, y, :] = binned[x, y, :]
+                    count_pixel[i] += 1
+        diff_object.append(chocolate)
+        # compute features
+        properties = regionprops(label_image=masque)
+        f_peri.append(properties[0].perimeter)
+        f_area.append(properties[0].area)
+        f_comp.append(f_peri[i]**2/f_area[i])
+        f_rect.append(f_area[i]/properties[0].area_bbox)
+        i += 1
+    return diff_object, count_pixel, f_peri, f_area, f_comp, f_rect
