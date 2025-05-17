@@ -8,6 +8,8 @@ from PIL import Image
 from tqdm import tqdm
 import napari
 
+from skimage.measure import regionprops
+
 def median_bin_rgb(image, block_size=(2, 2)):
     channels = []
     for i in range(3):  # R, G, B
@@ -74,3 +76,35 @@ def gmm_on_spx_predict(gmm, X, spx):
     labels = labels.reshape((spx.shape[0], spx.shape[1]))
     return labels
 
+def features_objects(contours, binned, processed):
+    # initialize lists to store images of each object
+    # and features
+    count_pixel = []
+    diff_object = []
+
+    f_peri = []
+    f_area = []
+    f_comp = []
+    f_rect = []
+
+    i = 0
+    for contour in contours:
+        count_pixel.append(0)
+        masque = np.zeros_like(processed)
+        cv2.drawContours(masque, [contour], -1, 255, thickness= cv2.FILLED)
+        chocolate = np.zeros_like(binned)
+        N, M, _ = binned.shape
+        for x in range(N):
+            for y in range(M):
+                if masque[x, y] != 0:
+                    chocolate[x, y, :] = binned[x, y, :]
+                    count_pixel[i] += 1
+        diff_object.append(chocolate)
+        # compute features
+        properties = regionprops(label_image=masque)
+        f_peri.append(properties[0].perimeter)
+        f_area.append(properties[0].area)
+        f_comp.append(f_peri[i]**2/f_area[i])
+        f_rect.append(f_area[i]/properties[0].area_bbox)
+        i += 1
+    return diff_object, count_pixel, f_peri, f_area, f_comp, f_rect
