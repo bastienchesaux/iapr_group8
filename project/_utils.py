@@ -144,16 +144,30 @@ def region_growing(rgb_img, hsv_img, mask):
     return rg_mask
 
 def watershed(mask):
-    distance = scipy.ndimage.distance_transform_edt(mask)
-    coordinates = skim.feature.peak_local_max(distance, labels=mask, footprint=skim.morphology.disk(20))
+        labels = skim.measure.label(mask)
 
-    local_maxi = np.zeros_like(distance, dtype=bool)
-    local_maxi[tuple(coordinates.T)] = True
+        print(labels.max())
+        for i in range(labels.max()):
+            area = (labels == i+1)
+            if np.count_nonzero(area) > 2600:
+                distance = scipy.ndimage.distance_transform_edt(area)
+                coordinates = skim.feature.peak_local_max(distance, labels=area, footprint=skim.morphology.disk(10))
 
-    markers = scipy.ndimage.label(local_maxi)[0]
+                local_maxi = np.zeros_like(distance, dtype=bool)
+                local_maxi[tuple(coordinates.T)] = True
 
-    labels = skim.segmentation.watershed(-distance, markers, mask=mask)
-    return labels
+                markers = scipy.ndimage.label(local_maxi)[0]
+                new_labels = skim.segmentation.watershed(-distance, markers, mask=area)
+                new_labels[new_labels != 0] += labels.max()-i-1
+
+                labels = labels + new_labels
+
+        for i in range(labels.max()):
+            area = (labels == i+1)
+            if np.count_nonzero(area) == 0:
+                labels[labels > i] -= 1
+
+        return labels
 
 def features_objects(contours, binned, processed):
     # initialize lists to store images of each object
