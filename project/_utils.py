@@ -103,7 +103,7 @@ def merge_labels(labels, target, merge_ratio):
 
     for other in touching:
         ratio = np.count_nonzero(labels[boundary]==other)/min(np.count_nonzero(mask), np.count_nonzero(labels==other))
-        print(f'ratio of contact between {target} and {other}: {ratio}')
+        #print(f'ratio of contact between {target} and {other}: {ratio}')
         if ratio > merge_ratio:
             merged[labels==other] = target
     
