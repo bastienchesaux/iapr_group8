@@ -3,11 +3,13 @@ import sklearn
 import scipy
 import cv2
 import numpy as np
+import scipy.ndimage as ndi
 
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
 import napari
+from typing import Callable
 
 from skimage.measure import regionprops
 
@@ -18,22 +20,16 @@ def median_bin_rgb(image, block_size=(2, 2)):
         channels.append(channel)
     return np.stack(channels, axis=-1).astype(np.uint8)
 
-def hsv_spx_feat(hsv_img, spx, agg_func=np.median):
-    h = np.zeros(np.max(spx)+1)
-    s = np.zeros(np.max(spx)+1)
-    v = np.zeros(np.max(spx)+1)
-    for i in range(np.max(spx)+1):
-        mask = spx == i
-        h[i] = agg_func(hsv_img[mask,0])/180
-        s[i] = agg_func(hsv_img[mask,1])/255
-        v[i] = agg_func(hsv_img[mask, 2])/255
+def hsv_spx_feat(hsv_img, spx, agg_func=np.median):    
+    label_ids = np.arange(spx.max() + 1)        
+    h = ndi.labeled_comprehension(hsv_img[..., 0],labels=spx,index=label_ids,func=agg_func,out_dtype=float,default=np.nan)/180 #cv2 convention
+    s = ndi.labeled_comprehension(hsv_img[..., 1],spx,label_ids,func=agg_func,out_dtype=float,default=np.nan)/255
+    v = ndi.labeled_comprehension(hsv_img[..., 2],spx,label_ids,func=agg_func, out_dtype=float,default=np.nan)/255
 
     hx = np.cos(h*2*np.pi)
     hy = np.sin(h*2*np.pi)
 
-    feat = np.array([h, s, v])
-    X = sklearn.preprocessing.StandardScaler().fit_transform(feat.T)
-
+    feat = np.array([hx, hy, s, v])
     return feat.T
 
 def rgb_spx_feat(rgb_img, spx, agg_func=np.median):
@@ -76,6 +72,37 @@ def gmm_on_spx_predict(gmm, X, spx):
     labels = gmm.predict(X.reshape((-1, X.shape[2])))
     labels = labels.reshape((spx.shape[0], spx.shape[1]))
     return labels
+
+def kl_divergence_gaussians(mu0, cov0, mu1, cov1):
+    k = len(mu0)
+    cov1_inv = np.linalg.inv(cov1)
+    diff = mu1 - mu0
+
+    term1 = np.trace(cov1_inv @ cov0)
+    term2 = 5*diff.T @ cov1_inv @ diff
+    term3 = np.log(np.linalg.det(cov1) / np.linalg.det(cov0))
+    return 0.5 * (term1 + term2 - k + term3)
+
+def symmetric_kl(mu0, cov0, mu1, cov1):
+    return 0.5 * (
+        kl_divergence_gaussians(mu0, cov0, mu1, cov1) +
+        kl_divergence_gaussians(mu1, cov1, mu0, cov0)
+    )
+
+def merge_labels(labels, target, merge_ratio):
+    merged = labels.copy()
+
+    mask = labels==target
+    boundary = ndi.binary_dilation(mask, np.ones((3,3))) ^ mask
+    touching = np.unique(labels[boundary])
+
+    for other in touching:
+        ratio = np.count_nonzero(labels[boundary]==other)/min(np.count_nonzero(mask), np.count_nonzero(labels==other))
+        #print(f'ratio of contact between {target} and {other}: {ratio}')
+        if ratio > merge_ratio:
+            merged[labels==other] = target
+    
+    return merged
 
 def rgb_to_hsv(rgb_img):
     bgr_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
@@ -144,16 +171,30 @@ def region_growing(rgb_img, hsv_img, mask):
     return rg_mask
 
 def watershed(mask):
-    distance = scipy.ndimage.distance_transform_edt(mask)
-    coordinates = skim.feature.peak_local_max(distance, labels=mask, footprint=skim.morphology.disk(20))
+        labels = skim.measure.label(mask)
 
-    local_maxi = np.zeros_like(distance, dtype=bool)
-    local_maxi[tuple(coordinates.T)] = True
+        print(labels.max())
+        for i in range(labels.max()):
+            area = (labels == i+1)
+            if np.count_nonzero(area) > 2600:
+                distance = scipy.ndimage.distance_transform_edt(area)
+                coordinates = skim.feature.peak_local_max(distance, labels=area, footprint=skim.morphology.disk(10))
 
-    markers = scipy.ndimage.label(local_maxi)[0]
+                local_maxi = np.zeros_like(distance, dtype=bool)
+                local_maxi[tuple(coordinates.T)] = True
 
-    labels = skim.segmentation.watershed(-distance, markers, mask=mask)
-    return labels
+                markers = scipy.ndimage.label(local_maxi)[0]
+                new_labels = skim.segmentation.watershed(-distance, markers, mask=area)
+                new_labels[new_labels != 0] += labels.max()-i-1
+
+                labels = labels + new_labels
+
+        for i in range(labels.max()):
+            area = (labels == i+1)
+            if np.count_nonzero(area) == 0:
+                labels[labels > i] -= 1
+
+        return labels
 
 def features_objects(nb_objects, processed, binned):
     # initialize lists to store images of each object
