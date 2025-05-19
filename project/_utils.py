@@ -201,11 +201,10 @@ def features_objects(nb_objects, processed, binned):
     # and features
     contours = []
     diff_object = []
-    count_pixel = []
     f_rect = []
     summ = []
     for i in range(nb_objects):
-        count_pixel.append(0)
+        count_pixel = 0
         chocolate = np.zeros_like(binned)
         masque = (processed == i+1).astype(np.uint8)
         contour, _ = cv2.findContours(masque, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -215,27 +214,26 @@ def features_objects(nb_objects, processed, binned):
             for y in range(M):
                 if masque[x, y] != 0:
                     chocolate[x, y, :] = binned[x, y, :]
-                    count_pixel[i] += 1
+                    count_pixel += 1
         diff_object.append(chocolate)
         # compute features
         contours.append(contour)
         properties = regionprops(label_image=masque)
         f_area = properties[0].area
         f_rect.append(f_area/properties[0].area_bbox)
-        summ.append(np.sum(chocolate)/count_pixel[i])
+        summ.append(np.sum(chocolate)/count_pixel)
 
-    return contours, diff_object, count_pixel, f_rect, summ
+    return contours, diff_object, f_rect, summ
 
 def features_ref(nb_ref, processed, binned):
     # initialize lists to store images of each object
     contours = []
     choco = []
-    count_pixel = []
     f_rect = []
     summ = []
     # initialize variables
     for i in range(nb_ref):
-        count_pixel.append(0)
+        count_pixel = 0
         chocolate = np.zeros_like(binned[i])
         processed[i] = processed[i].astype(np.uint8)
         contour, _ = cv2.findContours(processed[i], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -245,16 +243,16 @@ def features_ref(nb_ref, processed, binned):
             for y in range(M):
                 if processed[i][x, y] != 0:
                     chocolate[x, y, :] = binned[i][x, y, :]
-                    count_pixel[i] += 1
+                    count_pixel += 1
         choco.append(chocolate)
         # compute features
         contours.append(contour)
         properties = regionprops(label_image=processed[i])
         f_area = properties[0].area
         f_rect.append(f_area/properties[0].area_bbox)
-        summ.append(np.sum(chocolate)/count_pixel[i])
+        summ.append(np.sum(chocolate)/count_pixel)
 
-    return contours, choco, count_pixel, f_rect, summ
+    return contours, choco, f_rect, summ
 
 def interpolation(contours: np.ndarray, n_samples: int = 11):
     N = len(contours)
@@ -292,3 +290,36 @@ def compute_descriptor(contours: np.ndarray, n_samples: int = 11):
         descriptors[i] = np.fft.fft(contour[:, 0] + 1j * contour[:, 1])
 
     return descriptors
+
+def classifier(binned, labels, ref, ref_annotated):
+    # Features references
+    contours_ref, _, f_rect_ref, sum_choc_annotated = features_ref(len(ref), ref_annotated, ref)
+
+    # Features objects
+    contours_object, _, f_rect, array_sum = features_objects(np.max(labels), labels, binned)
+
+    # Compute descriptors
+    # Fourier descriptors
+    N = len(contours_ref)
+    n_samples = 11
+
+    contours_inter_ref = interpolation(contours_ref, n_samples)
+    descriptors_ref = compute_descriptor(contours_inter_ref, n_samples)
+
+    contours_inter_object = interpolation(contours_object, n_samples)
+    descriptors_object = compute_descriptor(contours_inter_object, n_samples)
+
+    # Print the number of chocolates per image
+    nb_final_choc = np.zeros(len(ref))
+    for n in range(len(array_sum)):
+        dist_descriptor = []
+        for i in range(len(ref)):
+            component_ref = np.concatenate([descriptors_ref[i][1:4], descriptors_ref[i][7:8]])
+            component_object = np.concatenate([descriptors_object[n][1:4], descriptors_object[n][7:8]])
+            vector = np.abs(np.abs(component_ref) - np.abs(component_object))
+            dist_descriptor.append(np.linalg.norm(vector))
+        closest_choco = np.argmin(dist_descriptor)
+        if ((sum_choc_annotated[closest_choco] - 100) < array_sum[n]) & (f_rect_ref[closest_choco] - 0.1 < f_rect[n]) & (f_rect_ref[closest_choco] + 0.1 > f_rect[n]):
+            nb_final_choc[closest_choco] += 1
+
+    return nb_final_choc
