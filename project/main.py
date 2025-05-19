@@ -2,48 +2,28 @@ import skimage as skim
 import sklearn 
 import cv2
 import numpy as np
-#import os # NO
 import csv
-
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
-import napari # NO
+
 import _utils
+import config
 
 
-if __name__ == "__main__":
-    # table with name of chocolate
-    chocolates = {
-        0:  'Amandina',
-        1:  'Arabia',
-        2:  'Comtesse',
-        3:  'Creme_brulee',
-        4:  'Jelly_Black',
-        5:  'Jelly_Milk',
-        6:  'Jelly_White',
-        7:  'Noblesse',
-        8:  'Noir_authentique',
-        9:  'Passion_au_lait',
-        10: 'Stracciatella',
-        11: 'Tentation_noir',
-        12: 'Triangolo'
-    }
-
-    # directory paths
-    reference_path = '../data/dataset_project_iapr2025/references'
-    annotation_path = '../data/dataset_project_iapr2025/references_annotated'
-
-    # full path and load images
+def compute_ref_choco():
     ref_choco = []
-    ref_choco_annotated = []
-    for i in range(len(chocolates)):
-        img = np.array(Image.open(reference_path+'/'+chocolates[i]+'.jpg'))
+    for i in range(len(config.chocolates)):
+        img = np.array(Image.open(config.reference_path+'/'+config.chocolates[i]+'.jpg'))
         binned_ref = _utils.median_bin_rgb(img, block_size=(10, 10))
         ref_choco.append(binned_ref)
+    return ref_choco
 
-        img_annotated = np.array(Image.open(annotation_path+'/'+chocolates[i]+'_annotated.jpg'))
-        binned_ref_annotated = skim.measure.block_reduce(img_annotated, block_size=(10, 10), func=np.median)
+def compute_ref_choco_annotated():
+    ref_choco_annotated = []
+    for i in range(len(config.chocolates)):
+        img = np.array(Image.open(config.annotated_path+'/'+config.chocolates[i]+'_annotated.jpg'))
+        binned_ref_annotated = skim.measure.block_reduce(img, block_size=(10, 10), func=np.median)
         N, M = binned_ref_annotated.shape
         for j in range(N):
             for k in range(M):
@@ -52,13 +32,13 @@ if __name__ == "__main__":
                 else:
                     binned_ref_annotated[j][k] = 0
         ref_choco_annotated.append(binned_ref_annotated)
+    return ref_choco_annotated
 
+def compute_gmm_ref():
     feat_ref = []
-    names = ['Arabia', 'Jelly_Black', 'Jelly_Milk', 'Noblesse', 'Noir_authentique', 'Passion_au_lait', 'Stracciatella', 'Tentation_noir', 'Triangolo']
-    
-    for name in names:
-        ref = np.array(Image.open(reference_path+'/'+name+'.jpg'))
-        annot = np.array(Image.open(annotation_path+'/'+name+'_annotated.jpg'), dtype=bool)
+    for name in config.names:
+        ref = np.array(Image.open(config.reference_path+'/'+name+'.jpg'))
+        annot = np.array(Image.open(config.annotated_path+'/'+name+'_annotated.jpg'), dtype=bool)
 
         binned = _utils.median_bin_rgb(ref, block_size=(10, 10))
         annot = skim.measure.block_reduce(annot, block_size=(10,10), func=np.median)
@@ -81,17 +61,12 @@ if __name__ == "__main__":
     feat_ref = np.vstack(feat_ref)
     gmm_ref = sklearn.mixture.GaussianMixture(n_components=1, covariance_type='full', reg_covar=1e-3)
     gmm_ref.fit(feat_ref)
+    return gmm_ref
 
-    with open('sample_submission.csv', mode='r') as file:
-        reader = csv.reader(file)
-        rows = list(reader)
-
-    test_data_path = '../data/dataset_project_iapr2025/test'
-    save_data_path = '../data/dataset_project_iapr2025/binary_masks'
-    for row in rows[1:]:
+def compute_nb_chocolate(row, ref_choco, ref_choco_annotated, gmm_ref):
         filename = '/L' + row[0] + '.jpg'
         filename2 = '/L' + row[0] + '_2' + '.jpg'
-        full_path = test_data_path + filename
+        full_path = config.test_data_path + filename
 
         img = np.array(Image.open(full_path))
         binned = _utils.median_bin_rgb(img, block_size=(10, 10))
@@ -114,36 +89,50 @@ if __name__ == "__main__":
         merged = _utils.merge_labels(labels, best_label, 0.25)
         binary = merged==best_label
 
+        # ------------------ TEMP ----------------------
         plt.figure(figsize=(9,6))
         plt.imshow(binned)
         plt.imshow(binary, alpha=0.7, cmap='Reds', interpolation='none')
         plt.axis('off')
-        plt.savefig(save_data_path+'/'+filename)
+        plt.savefig(config.save_data_path+'/'+filename)
         plt.close()
 
         rg_mask = _utils.region_growing(binned, binned_hsv, binary)
 
         labels = _utils.watershed(rg_mask)
-
         labels *= rg_mask
 
+        # ------------------ TEMP ----------------------
         plt.figure(figsize=(9,6))
         plt.imshow(binned)
         plt.imshow(labels, alpha=0.7, cmap='inferno')
         plt.axis('off')
-        plt.savefig(save_data_path+'/'+filename2)
+        plt.savefig(config.save_data_path+'/'+filename2)
         plt.close()
 
         nb_chocolate = _utils.classifier(binned, labels, ref_choco, ref_choco_annotated)
-        print(nb_chocolate)
+        return(nb_chocolate)
+
+if __name__ == "__main__":
+
+    ref_choco = compute_ref_choco()
+    ref_choco_annotated = compute_ref_choco_annotated()
+
+    gmm_ref = compute_gmm_ref()
+
+    with open('sample_submission.csv', mode='r') as file:
+        reader = csv.reader(file)
+        rows = list(reader)
+
+    for row in rows[1:]:
+        nb_chocolate = compute_nb_chocolate(row, ref_choco, ref_choco_annotated, gmm_ref)
 
         for i in range(len(ref_choco)):
             row[i+1] = str(int(nb_chocolate[i]))
 
-        # Save the modified rows back to the CSV file
         with open('sample_submission.csv', mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(rows[0])  # Write the header
-            writer.writerows(rows[1:])  # Write the modified rows
+            writer.writerow(rows[0])
+            writer.writerows(rows[1:])
 
 
