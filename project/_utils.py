@@ -176,7 +176,7 @@ def watershed(mask):
         print(labels.max())
         for i in range(labels.max()):
             area = (labels == i+1)
-            if np.count_nonzero(area) > 2600:
+            if np.count_nonzero(area) > 2800:
                 distance = scipy.ndimage.distance_transform_edt(area)
                 coordinates = skim.feature.peak_local_max(distance, labels=area, footprint=skim.morphology.disk(10))
 
