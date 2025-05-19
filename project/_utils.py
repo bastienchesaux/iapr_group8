@@ -8,7 +8,7 @@ import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
-import napari
+import napari # NO
 from typing import Callable
 
 from skimage.measure import regionprops
@@ -31,18 +31,6 @@ def hsv_spx_feat(hsv_img, spx, agg_func=np.median):
 
     feat = np.array([hx, hy, s, v])
     return feat.T
-
-def rgb_spx_feat(rgb_img, spx, agg_func=np.median):
-    for i in range(np.max(spx)+1):
-        mask = spx == i
-        r = agg_func(rgb_img[mask,0])
-        g = agg_func(rgb_img[mask,1])
-        b = agg_func(rgb_img[mask, 2])
-
-    feat = np.array([r, g, b])
-    X = sklearn.preprocessing.StandardScaler().fit_transform(feat.T)
-
-    return X
 
 def gmm_on_spx_fit(c_range, X, plot=False):
     best_bic = np.inf
@@ -173,7 +161,6 @@ def region_growing(rgb_img, hsv_img, mask):
 def watershed(mask):
         labels = skim.measure.label(mask)
 
-        print(labels.max())
         for i in range(labels.max()):
             area = (labels == i+1)
             if np.count_nonzero(area) > 2800:
