@@ -155,23 +155,20 @@ def watershed(mask):
     labels = skim.segmentation.watershed(-distance, markers, mask=mask)
     return labels
 
-def features_objects(contours, binned, processed):
+def features_objects(nb_objects, processed, binned):
     # initialize lists to store images of each object
     # and features
-    count_pixel = []
+    contours = []
     diff_object = []
-
-    f_peri = []
-    f_area = []
-    f_comp = []
+    count_pixel = []
     f_rect = []
-
-    i = 0
-    for contour in contours:
+    summ = []
+    for i in range(nb_objects):
         count_pixel.append(0)
-        masque = np.zeros_like(processed)
-        cv2.drawContours(masque, [contour], -1, 255, thickness= cv2.FILLED)
         chocolate = np.zeros_like(binned)
+        masque = (processed == i+1).astype(np.uint8)
+        contour, _ = cv2.findContours(masque, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
         N, M, _ = binned.shape
         for x in range(N):
             for y in range(M):
@@ -180,10 +177,77 @@ def features_objects(contours, binned, processed):
                     count_pixel[i] += 1
         diff_object.append(chocolate)
         # compute features
+        contours.append(contour)
         properties = regionprops(label_image=masque)
-        f_peri.append(properties[0].perimeter)
-        f_area.append(properties[0].area)
-        f_comp.append(f_peri[i]**2/f_area[i])
-        f_rect.append(f_area[i]/properties[0].area_bbox)
-        i += 1
-    return diff_object, count_pixel, f_peri, f_area, f_comp, f_rect
+        f_area = properties[0].area
+        f_rect.append(f_area/properties[0].area_bbox)
+        summ.append(np.sum(chocolate)/count_pixel[i])
+
+    return contours, diff_object, count_pixel, f_rect, summ
+
+def features_ref(nb_ref, processed, binned):
+    # initialize lists to store images of each object
+    contours = []
+    choco = []
+    count_pixel = []
+    f_rect = []
+    summ = []
+    # initialize variables
+    for i in range(nb_ref):
+        count_pixel.append(0)
+        chocolate = np.zeros_like(binned[i])
+        processed[i] = processed[i].astype(np.uint8)
+        contour, _ = cv2.findContours(processed[i], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        N, M, _ = binned[i].shape
+        for x in range(N):
+            for y in range(M):
+                if processed[i][x, y] != 0:
+                    chocolate[x, y, :] = binned[i][x, y, :]
+                    count_pixel[i] += 1
+        choco.append(chocolate)
+        # compute features
+        contours.append(contour)
+        properties = regionprops(label_image=processed[i])
+        f_area = properties[0].area
+        f_rect.append(f_area/properties[0].area_bbox)
+        summ.append(np.sum(chocolate)/count_pixel[i])
+
+    return contours, choco, count_pixel, f_rect, summ
+
+def interpolation(contours: np.ndarray, n_samples: int = 11):
+    N = len(contours)
+
+    contours_inter = np.zeros((N, n_samples, 2))
+
+    for i, contour in enumerate(contours):
+        contour = np.concatenate((contour[0][0], contour[0].reshape(-1,2)), axis=0)
+
+        cum_dist = np.cumsum(np.linalg.norm(np.diff(contour, axis=0), axis=1))
+        cum_dist = np.concatenate(([0], cum_dist))
+
+        t_end = cum_dist[-1]
+        step = t_end / (n_samples)
+        interp_pts = np.array([i*step for i in range(n_samples)])
+        contours_inter[i,:,0]= np.interp(interp_pts, cum_dist, contour[:,0])
+        contours_inter[i,:,1]= np.interp(interp_pts, cum_dist, contour[:,1])
+    return contours_inter
+
+def compute_descriptor(contours: np.ndarray, n_samples: int = 11):
+    N = len(contours)
+    descriptors = np.zeros((N, n_samples), dtype=np.complex128)
+
+    for i in range(N):
+        contour = contours[i]
+        K = len(contour)
+        n = min(K, n_samples)
+        
+        if K < n_samples:
+            padding = np.zeros((n_samples - K, 2))
+            contour = np.concatenate((contour[0][0], padding), axis=0)
+        elif K > n_samples:
+            contour = contour[:n_samples]
+
+        descriptors[i] = np.fft.fft(contour[:, 0] + 1j * contour[:, 1])
+
+    return descriptors
