@@ -207,8 +207,10 @@ def features_objects(nb_objects, processed, binned):
         count_pixel = 0
         chocolate = np.zeros_like(binned)
         masque = (processed == i+1).astype(np.uint8)
+        if masque.sum() == 0:
+            continue
         contour, _ = cv2.findContours(masque, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+
         N, M, _ = binned.shape
         for x in range(N):
             for y in range(M):
@@ -292,6 +294,8 @@ def compute_descriptor(contours: np.ndarray, n_samples: int = 11):
     return descriptors
 
 def classifier(binned, labels, ref, ref_annotated):
+    if np.max(labels) == 0:
+        return np.zeros(len(ref)) # no chocolate detected
     # Features references
     contours_ref, _, f_rect_ref, sum_choc_annotated = features_ref(len(ref), ref_annotated, ref)
 
@@ -319,7 +323,7 @@ def classifier(binned, labels, ref, ref_annotated):
             vector = np.abs(np.abs(component_ref) - np.abs(component_object))
             dist_descriptor.append(np.linalg.norm(vector))
         closest_choco = np.argmin(dist_descriptor)
-        if ((sum_choc_annotated[closest_choco] - 100) < array_sum[n]) & (f_rect_ref[closest_choco] - 0.1 < f_rect[n]) & (f_rect_ref[closest_choco] + 0.1 > f_rect[n]):
+        if ((sum_choc_annotated[closest_choco] - 100) < array_sum[n]) & ((sum_choc_annotated[closest_choco] + 100) > array_sum[n]) & (f_rect_ref[closest_choco] - 0.1 < f_rect[n]) & (f_rect_ref[closest_choco] + 0.1 > f_rect[n]):
             nb_final_choc[closest_choco] += 1
 
     return nb_final_choc
