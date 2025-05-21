@@ -6,8 +6,6 @@ import numpy as np
 import scipy.ndimage as ndi
 
 import matplotlib.pyplot as plt
-from PIL import Image
-from tqdm import tqdm
 
 from skimage.measure import regionprops
 
@@ -29,18 +27,6 @@ def hsv_spx_feat(hsv_img, spx, agg_func=np.median):
 
     feat = np.array([hx, hy, s, v])
     return feat.T
-
-def rgb_spx_feat(rgb_img, spx, agg_func=np.median):
-    for i in range(np.max(spx)+1):
-        mask = spx == i
-        r = agg_func(rgb_img[mask,0])
-        g = agg_func(rgb_img[mask,1])
-        b = agg_func(rgb_img[mask, 2])
-
-    feat = np.array([r, g, b])
-    X = sklearn.preprocessing.StandardScaler().fit_transform(feat.T)
-
-    return X
 
 def gmm_on_spx_fit(c_range, X, plot=False):
     best_bic = np.inf
@@ -142,14 +128,13 @@ def region_growing(rgb_img, hsv_img, mask):
         mean_sat = mean_from_mask(hsv_img[:,:,1], small_mask)
         mean_val = mean_from_mask(hsv_img[:,:,2], small_mask)
 
-        offset_hue = 54
-        offset_sat = 40
-        offset_val = 40
+        offset_hue = 80
+        offset_sat = 60
+        offset_val = 60
 
-        rgb_offset = 30
-        offset_red = rgb_offset
-        offset_green = rgb_offset
-        offset_blue = rgb_offset
+        offset_red = 45
+        offset_green = 60
+        offset_blue = 70
         
         labelled = (offset_range(hsv_img[:,:,0], mean_hue, offset_hue) & offset_range(hsv_img[:,:,1], mean_sat, offset_sat) & offset_range(hsv_img[:,:,2], mean_val, offset_val) &
                     offset_range(rgb_img[:,:,0], mean_red, offset_red) & offset_range(rgb_img[:,:,1], mean_green, offset_green) & offset_range(rgb_img[:,:,2], mean_blue, offset_blue))
@@ -171,10 +156,9 @@ def region_growing(rgb_img, hsv_img, mask):
 def watershed(mask):
         labels = skim.measure.label(mask)
 
-        print(labels.max())
         for i in range(labels.max()):
             area = (labels == i+1)
-            if np.count_nonzero(area) > 2600:
+            if np.count_nonzero(area) > 2800:
                 distance = scipy.ndimage.distance_transform_edt(area)
                 coordinates = skim.feature.peak_local_max(distance, labels=area, footprint=skim.morphology.disk(10))
 
@@ -185,7 +169,7 @@ def watershed(mask):
                 new_labels = skim.segmentation.watershed(-distance, markers, mask=area)
                 new_labels[new_labels != 0] += labels.max()-i-1
 
-                labels = labels + new_labels
+                labels += new_labels
 
         for i in range(labels.max()):
             area = (labels == i+1)
@@ -194,35 +178,134 @@ def watershed(mask):
 
         return labels
 
-def features_objects(contours, binned, processed):
+def features_objects(nb_objects, processed, binned):
     # initialize lists to store images of each object
     # and features
-    count_pixel = []
+    contours = []
     diff_object = []
-
-    f_peri = []
-    f_area = []
-    f_comp = []
     f_rect = []
-
-    i = 0
-    for contour in contours:
-        count_pixel.append(0)
-        masque = np.zeros_like(processed)
-        cv2.drawContours(masque, [contour], -1, 255, thickness= cv2.FILLED)
+    summ = []
+    for i in range(nb_objects):
+        count_pixel = 0
         chocolate = np.zeros_like(binned)
+        masque = (processed == i+1).astype(np.uint8)
+        if masque.sum() == 0:
+            continue
+        contour, _ = cv2.findContours(masque, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         N, M, _ = binned.shape
         for x in range(N):
             for y in range(M):
                 if masque[x, y] != 0:
                     chocolate[x, y, :] = binned[x, y, :]
-                    count_pixel[i] += 1
+                    count_pixel += 1
         diff_object.append(chocolate)
         # compute features
+        contours.append(contour)
         properties = regionprops(label_image=masque)
-        f_peri.append(properties[0].perimeter)
-        f_area.append(properties[0].area)
-        f_comp.append(f_peri[i]**2/f_area[i])
-        f_rect.append(f_area[i]/properties[0].area_bbox)
-        i += 1
-    return diff_object, count_pixel, f_peri, f_area, f_comp, f_rect
+        f_area = properties[0].area
+        f_rect.append(f_area/properties[0].area_bbox)
+        summ.append(np.sum(chocolate)/count_pixel)
+
+    return contours, diff_object, f_rect, summ
+
+def features_ref(nb_ref, processed, binned):
+    # initialize lists to store images of each object
+    contours = []
+    choco = []
+    f_rect = []
+    summ = []
+    # initialize variables
+    for i in range(nb_ref):
+        count_pixel = 0
+        chocolate = np.zeros_like(binned[i])
+        processed[i] = processed[i].astype(np.uint8)
+        contour, _ = cv2.findContours(processed[i], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        N, M, _ = binned[i].shape
+        for x in range(N):
+            for y in range(M):
+                if processed[i][x, y] != 0:
+                    chocolate[x, y, :] = binned[i][x, y, :]
+                    count_pixel += 1
+        choco.append(chocolate)
+        # compute features
+        contours.append(contour)
+        properties = regionprops(label_image=processed[i])
+        f_area = properties[0].area
+        f_rect.append(f_area/properties[0].area_bbox)
+        summ.append(np.sum(chocolate)/count_pixel)
+
+    return contours, choco, f_rect, summ
+
+def interpolation(contours: np.ndarray, n_samples: int = 11):
+    N = len(contours)
+
+    contours_inter = np.zeros((N, n_samples, 2))
+
+    for i, contour in enumerate(contours):
+        contour = np.concatenate((contour[0][0], contour[0].reshape(-1,2)), axis=0)
+
+        cum_dist = np.cumsum(np.linalg.norm(np.diff(contour, axis=0), axis=1))
+        cum_dist = np.concatenate(([0], cum_dist))
+
+        t_end = cum_dist[-1]
+        step = t_end / (n_samples)
+        interp_pts = np.array([i*step for i in range(n_samples)])
+        contours_inter[i,:,0]= np.interp(interp_pts, cum_dist, contour[:,0])
+        contours_inter[i,:,1]= np.interp(interp_pts, cum_dist, contour[:,1])
+    return contours_inter
+
+def compute_descriptor(contours: np.ndarray, n_samples: int = 11):
+    N = len(contours)
+    descriptors = np.zeros((N, n_samples), dtype=np.complex128)
+
+    for i in range(N):
+        contour = contours[i]
+        K = len(contour)
+        n = min(K, n_samples)
+        
+        if K < n_samples:
+            padding = np.zeros((n_samples - K, 2))
+            contour = np.concatenate((contour[0][0], padding), axis=0)
+        elif K > n_samples:
+            contour = contour[:n_samples]
+
+        descriptors[i] = np.fft.fft(contour[:, 0] + 1j * contour[:, 1])
+
+    return descriptors
+
+def classifier(binned, labels, ref, ref_annotated):
+    if np.max(labels) == 0:
+        return np.zeros(len(ref)) # no chocolate detected
+    # Features references
+    contours_ref, _, f_rect_ref, sum_choc_annotated = features_ref(len(ref), ref_annotated, ref)
+
+    # Features objects
+    contours_object, _, f_rect, array_sum = features_objects(np.max(labels), labels, binned)
+
+    # Compute descriptors
+    # Fourier descriptors
+    N = len(contours_ref)
+    n_samples = 11
+
+    contours_inter_ref = interpolation(contours_ref, n_samples)
+    descriptors_ref = compute_descriptor(contours_inter_ref, n_samples)
+
+    contours_inter_object = interpolation(contours_object, n_samples)
+    descriptors_object = compute_descriptor(contours_inter_object, n_samples)
+
+    # Print the number of chocolates per image
+    nb_final_choc = np.zeros(len(ref))
+    for n in range(len(array_sum)):
+        dist_descriptor = []
+        for i in range(len(ref)):
+            component_ref = np.concatenate([descriptors_ref[i][1:4], descriptors_ref[i][7:8]])
+            component_object = np.concatenate([descriptors_object[n][1:4], descriptors_object[n][7:8]])
+            vector = np.abs(np.abs(component_ref) - np.abs(component_object))
+            dist_descriptor.append(np.linalg.norm(vector))
+        closest_choco = np.argmin(dist_descriptor)
+        if ((sum_choc_annotated[closest_choco] - 100) < array_sum[n]) & ((sum_choc_annotated[closest_choco] + 100) > array_sum[n]) & (f_rect_ref[closest_choco] - 0.1 < f_rect[n]) & (f_rect_ref[closest_choco] + 0.1 > f_rect[n]):
+            nb_final_choc[closest_choco] += 1
+
+    return nb_final_choc
