@@ -36,7 +36,7 @@ def compute_ref_choco_annotated():
 def compute_gmm_ref():
     feat_ref = []
     for name in config.names:
-        ref = np.array(Image.open(config.reference_path+'/'+name+'.jpg'))
+        ref = np.array(Image.open(config.reference_path+'/'+name+'.JPG'))
         annot = np.array(Image.open(config.annotated_path+'/'+name+'_annotated.jpg'), dtype=bool)
 
         binned_ref = _utils.median_bin_rgb(ref, block_size=(10, 10))
