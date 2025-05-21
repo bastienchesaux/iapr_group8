@@ -132,14 +132,13 @@ def region_growing(rgb_img, hsv_img, mask):
         mean_sat = mean_from_mask(hsv_img[:,:,1], small_mask)
         mean_val = mean_from_mask(hsv_img[:,:,2], small_mask)
 
-        offset_hue = 54
-        offset_sat = 40
-        offset_val = 40
+        offset_hue = 80
+        offset_sat = 60
+        offset_val = 60
 
-        rgb_offset = 30
-        offset_red = rgb_offset
-        offset_green = rgb_offset
-        offset_blue = rgb_offset
+        offset_red = 45
+        offset_green = 60
+        offset_blue = 70
         
         labelled = (offset_range(hsv_img[:,:,0], mean_hue, offset_hue) & offset_range(hsv_img[:,:,1], mean_sat, offset_sat) & offset_range(hsv_img[:,:,2], mean_val, offset_val) &
                     offset_range(rgb_img[:,:,0], mean_red, offset_red) & offset_range(rgb_img[:,:,1], mean_green, offset_green) & offset_range(rgb_img[:,:,2], mean_blue, offset_blue))
@@ -172,11 +171,11 @@ def watershed(mask):
 
                 markers = scipy.ndimage.label(local_maxi)[0]
                 new_labels = skim.segmentation.watershed(-distance, markers, mask=area)
-                new_labels[new_labels != 0] += labels.max()-i-1
+                new_labels[new_labels != 0] += labels.max()-i-1 # À vérifier
 
-                labels = labels + new_labels
+                labels += new_labels # À vérifier
 
-        for i in range(labels.max()):
+        for i in range(labels.max()): # À vérifier
             area = (labels == i+1)
             if np.count_nonzero(area) == 0:
                 labels[labels > i] -= 1

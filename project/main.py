@@ -65,7 +65,7 @@ def compute_gmm_ref():
 
 def compute_nb_chocolate(row, ref_choco, ref_choco_annotated, gmm_ref):
         filename = '/L' + row[0] + '.jpg'
-        filename2 = '/L' + row[0] + '_2' + '.jpg'
+        filename2 = '/L' + row[0] + '_3' + '.jpg'
         full_path = config.test_data_path + filename
 
         img = np.array(Image.open(full_path))
