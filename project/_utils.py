@@ -8,8 +8,6 @@ import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
-import napari
-from typing import Callable
 
 from skimage.measure import regionprops
 
