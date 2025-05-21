@@ -5,16 +5,15 @@ import numpy as np
 import csv
 import matplotlib.pyplot as plt
 from PIL import Image
-from tqdm import tqdm
 
-import _utils
-import config
+import src._utils as _utils
+import src.config as config
 
 
 def compute_ref_choco():
     ref_choco = []
     for i in range(len(config.chocolates)):
-        img = np.array(Image.open(config.reference_path+'/'+config.chocolates[i]+'.jpg'))
+        img = np.array(Image.open(config.reference_path+'/'+config.chocolates[i]+'.JPG'))
         binned_ref = _utils.median_bin_rgb(img, block_size=(10, 10))
         ref_choco.append(binned_ref)
     return ref_choco
@@ -40,18 +39,18 @@ def compute_gmm_ref():
         ref = np.array(Image.open(config.reference_path+'/'+name+'.jpg'))
         annot = np.array(Image.open(config.annotated_path+'/'+name+'_annotated.jpg'), dtype=bool)
 
-        binned = _utils.median_bin_rgb(ref, block_size=(10, 10))
+        binned_ref = _utils.median_bin_rgb(ref, block_size=(10, 10))
         annot = skim.measure.block_reduce(annot, block_size=(10,10), func=np.median)
 
-        binned_bgr = cv2.cvtColor(binned, cv2.COLOR_RGB2BGR)
-        binned_hsv = cv2.cvtColor(binned_bgr, cv2.COLOR_BGR2HSV)
+        binned_bgr_ref = cv2.cvtColor(binned_ref, cv2.COLOR_RGB2BGR)
+        binned_hsv_ref = cv2.cvtColor(binned_bgr_ref, cv2.COLOR_BGR2HSV)
 
-        spx = skim.segmentation.slic(binned, n_segments=5000, compactness=.1, sigma=1, start_label=0)
+        spx = skim.segmentation.slic(binned_ref, n_segments=5000, compactness=.1, sigma=1, start_label=0)
 
-        hsv_feat = _utils.hsv_spx_feat(binned_hsv, spx, np.median)
-        h_ref = binned_hsv[annot>=1][:,0]/180
-        s_ref = binned_hsv[annot>=1][:,1]/255
-        v_ref = binned_hsv[annot>=1][:,2]/255
+        hsv_feat = _utils.hsv_spx_feat(binned_hsv_ref, spx, np.median)
+        h_ref = binned_hsv_ref[annot>=1][:,0]/180
+        s_ref = binned_hsv_ref[annot>=1][:,1]/255
+        v_ref = binned_hsv_ref[annot>=1][:,2]/255
 
         hx_ref = np.cos(h_ref*2*np.pi)
         hy_ref = np.sin(h_ref*2*np.pi)
@@ -64,11 +63,12 @@ def compute_gmm_ref():
     return gmm_ref
 
 def compute_nb_chocolate(row, ref_choco, ref_choco_annotated, gmm_ref):
-        filename = '/L' + row[0] + '.jpg'
-        filename2 = '/L' + row[0] + '_3' + '.jpg'
+        filename = '/L' + row[0] + '.JPG'
         full_path = config.test_data_path + filename
 
         img = np.array(Image.open(full_path))
+
+        #chocolate-background segmentation
         binned = _utils.median_bin_rgb(img, block_size=(10, 10))
 
         binned_hsv = _utils.rgb_to_hsv(binned)
@@ -89,27 +89,14 @@ def compute_nb_chocolate(row, ref_choco, ref_choco_annotated, gmm_ref):
         merged = _utils.merge_labels(labels, best_label, 0.25)
         binary = merged==best_label
 
-        # ------------------ TEMP ----------------------
-        plt.figure(figsize=(9,6))
-        plt.imshow(binned)
-        plt.imshow(binary, alpha=0.7, cmap='Reds', interpolation='none')
-        plt.axis('off')
-        plt.savefig(config.save_data_path+'/'+filename)
-        plt.close()
 
+        #region growing & watershed
         rg_mask = _utils.region_growing(binned, binned_hsv, binary)
 
         labels = _utils.watershed(rg_mask)
         labels *= rg_mask
 
-        # ------------------ TEMP ----------------------
-        plt.figure(figsize=(9,6))
-        plt.imshow(binned)
-        plt.imshow(labels, alpha=0.7, cmap='inferno')
-        plt.axis('off')
-        plt.savefig(config.save_data_path+'/'+filename2)
-        plt.close()
-
+        #classifier
         nb_chocolate = _utils.classifier(binned, labels, ref_choco, ref_choco_annotated)
         return(nb_chocolate)
 
