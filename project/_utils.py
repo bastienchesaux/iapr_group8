@@ -170,11 +170,11 @@ def watershed(mask):
 
                 markers = scipy.ndimage.label(local_maxi)[0]
                 new_labels = skim.segmentation.watershed(-distance, markers, mask=area)
-                new_labels[new_labels != 0] += labels.max()-i-1 # À vérifier
+                new_labels[new_labels != 0] += labels.max()-i-1
 
-                labels += new_labels # À vérifier
+                labels += new_labels
 
-        for i in range(labels.max()): # À vérifier
+        for i in range(labels.max()):
             area = (labels == i+1)
             if np.count_nonzero(area) == 0:
                 labels[labels > i] -= 1
